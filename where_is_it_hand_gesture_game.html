@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Where Is It? - The Hand Gesture Challenge</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Hands & Camera Utils CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brandYellow: '#FFD166',
+                        brandBlue: '#118AB2',
+                        brandGreen: '#06D6A0',
+                        brandRed: '#EF476F',
+                        brandDark: '#073B4C',
+                        brandPurple: '#8338EC'
+                    },
+                    fontFamily: {
+                        fredoka: ['Fredoka', 'sans-serif'],
+                        nunito: ['Nunito', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            background: linear-gradient(135deg, #e0f2fe 0%, #f0fdf4 50%, #fef3c7 100%);
+            touch-action: manipulation;
+        }
+        h1, h2, h3, .font-heading {
+            font-family: 'Fredoka', sans-serif;
+        }
+        .pop-card {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .pop-card:hover {
+            transform: translateY(-2px);
+        }
+        /* Video & Canvas Mirroring */
+        .mirror {
+            transform: scaleX(-1);
+        }
+        /* Dwell timer radial animation overlay */
+        .radial-progress {
+            background: conic-gradient(var(--fill-color, #06D6A0) calc(var(--progress, 0) * 1%), transparent 0);
+        }
+    </style>
+</head>
+<body class="min-h-screen text-brandDark flex flex-col justify-between overflow-x-hidden p-2 md:p-4">
+
+    <!-- Top Header Bar -->
+    <header class="max-w-6xl w-full mx-auto flex flex-wrap justify-between items-center bg-white/90 backdrop-blur-md rounded-2xl p-3 md:p-4 shadow-md mb-3 border-2 border-brandBlue/20">
+        <div class="flex items-center space-x-3">
+            <div class="w-12 h-12 rounded-xl bg-brandYellow flex items-center justify-center text-brandDark font-extrabold text-2xl shadow-inner border-2 border-yellow-400">
+                <i class="fa-solid fa-hand-holding-hand animate-bounce"></i>
+            </div>
+            <div>
+                <h1 class="text-xl md:text-2xl font-bold text-brandBlue tracking-wide leading-none">WHERE IS IT?</h1>
+                <p class="text-xs md:text-sm font-bold text-brandPurple">The Hand Gesture Challenge (Year 5 English)</p>
+            </div>
+        </div>
+        
+        <!-- Score & Status Indicators -->
+        <div class="flex items-center space-x-2 md:space-x-4 mt-2 sm:mt-0">
+            <div class="bg-amber-100 border-2 border-amber-300 px-3 py-1.5 rounded-xl flex items-center space-x-2">
+                <i class="fa-solid fa-star text-amber-500 text-lg"></i>
+                <span class="font-bold text-amber-900 text-base md:text-lg" id="scoreDisplay">Score: 0</span>
+            </div>
+            <div class="bg-emerald-100 border-2 border-emerald-300 px-3 py-1.5 rounded-xl flex items-center space-x-2">
+                <i class="fa-solid fa-layer-group text-emerald-600 text-lg"></i>
+                <span class="font-bold text-emerald-900 text-xs md:text-sm" id="levelDisplay">Level 1/3</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Game Container -->
+    <main class="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 items-start flex-1">
+        
+        <!-- LEFT: Interactive Webcam & Hand Tracking Area -->
+        <section class="lg:col-span-5 bg-white/95 rounded-3xl p-4 pop-card border-4 border-brandBlue/30 flex flex-col items-center">
+            <div class="flex justify-between items-center w-full mb-2">
+                <span class="font-heading font-bold text-brandBlue flex items-center space-x-2 text-sm md:text-base">
+                    <i class="fa-solid fa-video text-brandBlue"></i>
+                    <span>Webcam Hand Tracking</span>
+                </span>
+                <span id="cameraStatus" class="text-xs px-2.5 py-1 rounded-full font-bold bg-amber-100 text-amber-800">
+                    Connecting...
+                </span>
+            </div>
+
+            <!-- Webcam & Overlay Container -->
+            <div class="relative w-full aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-inner border-2 border-slate-300 flex items-center justify-center">
+                <video id="webcam" class="absolute inset-0 w-full h-full object-cover mirror opacity-0" playsinline></video>
+                <canvas id="gestureCanvas" class="absolute inset-0 w-full h-full object-cover mirror z-10"></canvas>
+                
+                <!-- Dwell Timer Progress Ring Overlay -->
+                <div id="dwellOverlay" class="absolute z-20 w-24 h-24 rounded-full radial-progress flex items-center justify-center opacity-0 transition-opacity duration-150 border-4 border-white shadow-2xl" style="--progress: 0; --fill-color: #06D6A0;">
+                    <div class="w-16 h-16 bg-white rounded-full flex flex-col items-center justify-center text-center shadow">
+                        <span id="dwellNumber" class="font-heading font-extrabold text-xl text-brandDark">0</span>
+                        <span class="text-[9px] font-bold text-slate-500 uppercase">Hold...</span>
+                    </div>
+                </div>
+
+                <!-- Video Loading / Error Modal Placeholder -->
+                <div id="webcamFallbackMsg" class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center text-white bg-slate-800/90 z-30">
+                    <i class="fa-solid fa-camera text-4xl mb-2 text-brandYellow animate-pulse"></i>
+                    <p class="text-sm font-bold">Waiting for camera permission...</p>
+                    <p class="text-xs text-slate-300 mt-1">Hold up 1, 2, 3, or 4 fingers to pick options!</p>
+                </div>
+            </div>
+
+            <!-- Live Detected Gesture Badge -->
+            <div class="w-full mt-3 bg-slate-100 rounded-xl p-3 border border-slate-200 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <span class="text-xs font-bold text-slate-500">Detected Gesture:</span>
+                    <span id="detectedGestureBadge" class="px-3 py-1 rounded-lg text-sm font-extrabold bg-slate-200 text-slate-700">
+                        None ✊
+                    </span>
+                </div>
+                <button id="toggleSimBtn" onclick="toggleSimPanel()" class="text-xs font-bold text-brandBlue underline hover:text-brandDark">
+                    Simulate Control
+                </button>
+            </div>
+
+            <!-- Simulation Fallback Controls (For testing or non-camera devices) -->
+            <div id="simPanel" class="hidden w-full mt-2 p-2 bg-blue-50 border border-blue-200 rounded-xl text-center">
+                <p class="text-xs font-bold text-blue-900 mb-2">Manual Testing Controls (No Camera Needed):</p>
+                <div class="grid grid-cols-4 gap-2">
+                    <button onclick="simulateGesture(1)" class="py-1.5 bg-blue-600 text-white font-bold text-xs rounded-lg shadow hover:bg-blue-700">1 Finger (A)</button>
+                    <button onclick="simulateGesture(2)" class="py-1.5 bg-green-600 text-white font-bold text-xs rounded-lg shadow hover:bg-green-700">2 Fingers (B)</button>
+                    <button onclick="simulateGesture(3)" class="py-1.5 bg-yellow-500 text-white font-bold text-xs rounded-lg shadow hover:bg-yellow-600">3 Fingers (C)</button>
+                    <button onclick="simulateGesture(4)" class="py-1.5 bg-purple-600 text-white font-bold text-xs rounded-lg shadow hover:bg-purple-700">4 Fingers (D)</button>
+                </div>
+            </div>
+
+            <!-- Gesture Guide Legend -->
+            <div class="w-full mt-3 grid grid-cols-4 gap-1.5 text-center text-[11px] font-bold">
+                <div class="bg-indigo-50 border border-indigo-200 p-1.5 rounded-lg text-indigo-900">
+                    <div class="text-base">☝️</div>
+                    <div>1 Finger = A</div>
+                </div>
+                <div class="bg-emerald-50 border border-emerald-200 p-1.5 rounded-lg text-emerald-900">
+                    <div class="text-base">✌️</div>
+                    <div>2 Fingers = B</div>
+                </div>
+                <div class="bg-amber-50 border border-amber-200 p-1.5 rounded-lg text-amber-900">
+                    <div class="text-base">🤟</div>
+                    <div>3 Fingers = C</div>
+                </div>
+                <div class="bg-purple-50 border border-purple-200 p-1.5 rounded-lg text-purple-900">
+                    <div class="text-base">🖐️</div>
+                    <div>4 Fingers = D</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT: Game Question & Answer Options -->
+        <section class="lg:col-span-7 bg-white/95 rounded-3xl p-4 md:p-6 pop-card border-4 border-brandYellow flex flex-col justify-between min-h-[480px]">
+            
+            <!-- Question Header & Scene Illustration -->
+            <div id="gamePlayArea">
+                <div class="flex justify-between items-center mb-3">
+                    <span id="questionNumBadge" class="bg-brandYellow/30 text-amber-900 text-xs md:text-sm font-extrabold px-3 py-1 rounded-full border border-brandYellow">
+                        Question 1 of 9
+                    </span>
+                    <span id="levelTitleBadge" class="text-xs md:text-sm font-bold text-brandBlue">
+                        Level 1: Picture Detective 🔍
+                    </span>
+                </div>
+
+                <!-- Question Text -->
+                <h2 id="questionText" class="text-lg md:text-xl font-heading font-extrabold text-brandDark mb-3 leading-snug">
+                    Where is the cat?
+                </h2>
+
+                <!-- Visual Scene Container (SVG / Canvas / Graphic) -->
+                <div id="sceneContainer" class="w-full h-44 md:h-52 bg-slate-100 rounded-2xl border-2 border-slate-200 flex items-center justify-center p-3 relative overflow-hidden mb-4">
+                    <!-- SVG Scene rendered dynamically -->
+                </div>
+
+                <!-- Answer Options Grid (A, B, C, D) -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="optionsGrid">
+                    <!-- Option A -->
+                    <div id="opt-0" class="option-card relative p-3.5 bg-slate-50 border-3 border-slate-200 rounded-2xl flex items-center space-x-3 transition-all duration-200 cursor-pointer hover:border-brandBlue">
+                        <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow">A</div>
+                        <div class="flex-1 font-bold text-sm md:text-base text-slate-800 opt-text">In the box</div>
+                        <div class="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-bold shrink-0">☝️ 1 Finger</div>
+                        <div class="progress-bar absolute bottom-0 left-0 h-1.5 bg-brandGreen rounded-b-2xl transition-all duration-75 w-0"></div>
+                    </div>
+                    <!-- Option B -->
+                    <div id="opt-1" class="option-card relative p-3.5 bg-slate-50 border-3 border-slate-200 rounded-2xl flex items-center space-x-3 transition-all duration-200 cursor-pointer hover:border-brandBlue">
+                        <div class="w-8 h-8 rounded-xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow">B</div>
+                        <div class="flex-1 font-bold text-sm md:text-base text-slate-800 opt-text">On the box</div>
+                        <div class="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold shrink-0">✌️ 2 Fingers</div>
+                        <div class="progress-bar absolute bottom-0 left-0 h-1.5 bg-brandGreen rounded-b-2xl transition-all duration-75 w-0"></div>
+                    </div>
+                    <!-- Option C -->
+                    <div id="opt-2" class="option-card relative p-3.5 bg-slate-50 border-3 border-slate-200 rounded-2xl flex items-center space-x-3 transition-all duration-200 cursor-pointer hover:border-brandBlue">
+                        <div class="w-8 h-8 rounded-xl bg-amber-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow">C</div>
+                        <div class="flex-1 font-bold text-sm md:text-base text-slate-800 opt-text">Under the box</div>
+                        <div class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold shrink-0">🤟 3 Fingers</div>
+                        <div class="progress-bar absolute bottom-0 left-0 h-1.5 bg-brandGreen rounded-b-2xl transition-all duration-75 w-0"></div>
+                    </div>
+                    <!-- Option D -->
+                    <div id="opt-3" class="option-card relative p-3.5 bg-slate-50 border-3 border-slate-200 rounded-2xl flex items-center space-x-3 transition-all duration-200 cursor-pointer hover:border-brandBlue">
+                        <div class="w-8 h-8 rounded-xl bg-purple-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow">D</div>
+                        <div class="flex-1 font-bold text-sm md:text-base text-slate-800 opt-text">Behind the box</div>
+                        <div class="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-bold shrink-0">🖐️ 4 Fingers</div>
+                        <div class="progress-bar absolute bottom-0 left-0 h-1.5 bg-brandGreen rounded-b-2xl transition-all duration-75 w-0"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Feedback Display Banner -->
+            <div id="feedbackBanner" class="hidden mt-4 p-3.5 rounded-2xl border-2 flex items-center justify-between animate-fade-in">
+                <div class="flex items-center space-x-3">
+                    <div id="feedbackIcon" class="w-10 h-10 rounded-full flex items-center justify-center text-xl text-white shadow"></div>
+                    <div>
+                        <h4 id="feedbackTitle" class="font-heading font-bold text-base">Great Job!</h4>
+                        <p id="feedbackMsg" class="text-xs md:text-sm font-semibold">Correct answer!</p>
+                    </div>
+                </div>
+                <button id="nextBtn" onclick="nextQuestion()" class="bg-brandBlue text-white px-4 py-2 rounded-xl font-bold text-sm shadow-md hover:bg-brandDark transition-all">
+                    Next Question <i class="fa-solid fa-arrow-right ml-1"></i>
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Calibration / Start Modal -->
+    <div id="startModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full text-center shadow-2xl border-4 border-brandYellow pop-card">
+            <div class="w-20 h-20 bg-brandYellow/30 text-brandBlue rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-brandYellow">
+                <i class="fa-solid fa-hand text-4xl"></i>
+            </div>
+            <h2 class="text-2xl font-heading font-extrabold text-brandDark mb-2">Ready for the Gesture Challenge?</h2>
+            <p class="text-sm text-slate-600 mb-6 font-semibold">
+                Use your real hands in front of your camera to answer! Hold 1, 2, 3, or 4 fingers up for 1 second to make your choice.
+            </p>
+            <div class="space-y-3">
+                <button onclick="startGame()" class="w-full py-3.5 bg-brandGreen text-brandDark font-heading font-extrabold text-lg rounded-2xl shadow-lg hover:bg-emerald-400 transition-all border-b-4 border-emerald-600 active:translate-y-1">
+                    <i class="fa-solid fa-play mr-2"></i> Start Challenge
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Final Celebration Victory Modal -->
+    <div id="victoryModal" class="hidden fixed inset-0 bg-slate-900/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full text-center shadow-2xl border-4 border-brandYellow pop-card relative overflow-hidden">
+            <div class="w-24 h-24 bg-amber-100 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-3 border-4 border-amber-300 shadow-inner">
+                <i class="fa-solid fa-trophy text-5xl animate-bounce"></i>
+            </div>
+            <h2 class="text-3xl font-heading font-extrabold text-brandDark mb-1">CHAMPION DETECTIVE! 🎉</h2>
+            <p class="text-sm font-bold text-brandBlue mb-4">You mastered all 9 Prepositions of Place!</p>
+            
+            <!-- Stars Earned -->
+            <div class="flex justify-center space-x-2 text-3xl text-amber-400 mb-4" id="starRating">
+                <i class="fa-solid fa-star"></i>
+                <i class="fa-solid fa-star"></i>
+                <i class="fa-solid fa-star"></i>
+            </div>
+
+            <!-- Score Summary Card -->
+            <div class="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4 mb-6">
+                <div class="text-xs font-bold text-slate-500 uppercase">Final Total Score</div>
+                <div class="text-4xl font-heading font-extrabold text-brandGreen my-1" id="finalScoreText">90 / 90</div>
+                <div class="text-xs font-bold text-slate-600" id="finalAccuracyText">Accuracy: 100%</div>
+            </div>
+
+            <button onclick="restartGame()" class="w-full py-3.5 bg-brandBlue text-white font-heading font-extrabold text-lg rounded-2xl shadow-lg hover:bg-brandDark transition-all border-b-4 border-blue-900 active:translate-y-1">
+                <i class="fa-solid fa-rotate-right mr-2"></i> Play Again
+            </button>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="max-w-6xl w-full mx-auto text-center text-xs font-bold text-slate-500 mt-4 pb-2">
+        EDUP3133 Technology for Teaching and Learning • Primary School English Digital Learning Object
+    </footer>
+
+    <!-- GAME LOGIC SCRIPT -->
+    <script>
+        /* ==========================================================================
+           1. AUDIO SYNTHESIS SOUND EFFECTS (Web Audio API)
+           ========================================================================== */
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioCtx();
+            }
+        }
+
+        function playSound(type) {
+            initAudio();
+            if (!audioCtx) return;
+
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            if (type === 'tick') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                osc.start(now);
+                osc.stop(now + 0.05);
+            } else if (type === 'correct') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                osc.start(now);
+                osc.stop(now + 0.4);
+            } else if (type === 'wrong') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, now);
+                osc.frequency.setValueAtTime(164.81, now + 0.15);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                osc.start(now);
+                osc.stop(now + 0.35);
+            } else if (type === 'victory') {
+                const notes = [523.25, 659.25, 783.99, 1046.50];
+                notes.forEach((freq, idx) => {
+                    const o = audioCtx.createOscillator();
+                    const g = audioCtx.createGain();
+                    o.connect(g);
+                    g.connect(audioCtx.destination);
+                    o.frequency.setValueAtTime(freq, now + idx * 0.12);
+                    g.gain.setValueAtTime(0.2, now + idx * 0.12);
+                    g.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.12 + 0.3);
+                    o.start(now + idx * 0.12);
+                    o.stop(now + idx * 0.12 + 0.3);
+                });
+            }
+        }
+
+        /* ==========================================================================
+           2. QUESTION DATABASE (3 Levels, 9 Questions total)
+           ========================================================================== */
+        const questionBank = [
+            // LEVEL 1: Picture Detective
+            {
+                level: 1,
+                levelTitle: "Level 1: Picture Detective 🔍",
+                question: "Where is the cat?",
+                options: ["In the box", "On the box", "Under the box", "Behind the box"],
+                correct: 0, // A
+                preposition: "in",
+                explanation: "The cat is inside the cardboard box!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <path d="M 60,110 L 140,110 L 140,160 L 60,160 Z" fill="#d97706" stroke="#92400e" stroke-width="3"/>
+                        <path d="M 50,110 L 70,85 L 150,85 L 140,110 Z" fill="#b45309"/>
+                        <!-- Cat inside -->
+                        <circle cx="100" cy="115" r="22" fill="#f97316"/>
+                        <polygon points="85,98 93,82 100,98" fill="#ea580c"/>
+                        <polygon points="100,98 107,82 115,98" fill="#ea580c"/>
+                        <circle cx="92" cy="110" r="3" fill="#000"/>
+                        <circle cx="108" cy="110" r="3" fill="#000"/>
+                        <polygon points="98,118 102,118 100,122" fill="#fda4af"/>
+                        <!-- Box front face flap -->
+                        <path d="M 60,110 L 140,110 L 130,135 L 70,135 Z" fill="#f59e0b" opacity="0.9"/>
+                    </svg>`
+            },
+            {
+                level: 1,
+                levelTitle: "Level 1: Picture Detective 🔍",
+                question: "Where is the ball?",
+                options: ["Under the table", "On the table", "Behind the table", "Near the window"],
+                correct: 1, // B
+                preposition: "on",
+                explanation: "The red ball is resting on top of the wooden table!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Table Top -->
+                        <rect x="70" y="95" width="160" height="16" rx="4" fill="#854d0e"/>
+                        <!-- Table Legs -->
+                        <rect x="85" y="111" width="12" height="55" fill="#a16207"/>
+                        <rect x="203" y="111" width="12" height="55" fill="#a16207"/>
+                        <!-- Ball ON table -->
+                        <circle cx="150" cy="73" r="22" fill="#ef476f"/>
+                        <path d="M 132,73 Q 150,55 168,73 Q 150,91 132,73 Z" fill="#ffffff" opacity="0.4"/>
+                    </svg>`
+            },
+            {
+                level: 1,
+                levelTitle: "Level 1: Picture Detective 🔍",
+                question: "Where are the shoes?",
+                options: ["On the bed", "Next to the bed", "Under the bed", "Above the bed"],
+                correct: 2, // C
+                preposition: "under",
+                explanation: "The blue shoes are below/under the frame of the bed!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Bed Frame & Mattress -->
+                        <rect x="50" y="70" width="200" height="40" rx="8" fill="#3b82f6"/>
+                        <rect x="40" y="50" width="25" height="70" rx="4" fill="#1e40af"/>
+                        <rect x="235" y="75" width="20" height="45" rx="4" fill="#1e40af"/>
+                        <rect x="50" y="110" width="200" height="12" fill="#1d4ed8"/>
+                        <!-- Bed Legs -->
+                        <rect x="55" y="122" width="12" height="38" fill="#1e3a8a"/>
+                        <rect x="228" y="122" width="12" height="38" fill="#1e3a8a"/>
+                        <!-- Shoes UNDER Bed -->
+                        <ellipse cx="120" cy="148" rx="14" ry="8" fill="#06d6a0"/>
+                        <ellipse cx="155" cy="148" rx="14" ry="8" fill="#06d6a0"/>
+                    </svg>`
+            },
+
+            // LEVEL 2: Sentence Challenge
+            {
+                level: 2,
+                levelTitle: "Level 2: Sentence Challenge ✍️",
+                question: "The dog is standing _____ the boy.",
+                options: ["in front of", "next to", "above", "in"],
+                correct: 1, // B
+                preposition: "next to",
+                explanation: "The dog is right beside / next to the boy!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Boy -->
+                        <circle cx="110" cy="70" r="20" fill="#fde047"/>
+                        <rect x="95" y="90" width="30" height="50" rx="6" fill="#0284c7"/>
+                        <rect x="97" y="140" width="10" height="25" fill="#0f172a"/>
+                        <rect x="113" y="140" width="10" height="25" fill="#0f172a"/>
+                        <!-- Dog Next to Boy -->
+                        <ellipse cx="185" cy="130" rx="22" ry="16" fill="#d97706"/>
+                        <circle cx="205" cy="115" r="14" fill="#d97706"/>
+                        <circle cx="210" cy="112" r="2.5" fill="#000"/>
+                        <ellipse cx="215" cy="120" rx="4" ry="3" fill="#000"/>
+                    </svg>`
+            },
+            {
+                level: 2,
+                levelTitle: "Level 2: Sentence Challenge ✍️",
+                question: "The teddy bear is peeking _____ the chair.",
+                options: ["under", "on", "behind", "between"],
+                correct: 2, // C
+                preposition: "behind",
+                explanation: "The teddy bear is located at the back/behind the chair!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Teddy Bear Peeking BEHIND -->
+                        <circle cx="130" cy="70" r="24" fill="#b45309"/>
+                        <circle cx="115" cy="55" r="8" fill="#92400e"/>
+                        <circle cx="145" cy="55" r="8" fill="#92400e"/>
+                        <circle cx="123" cy="67" r="3" fill="#000"/>
+                        <circle cx="137" cy="67" r="3" fill="#000"/>
+                        <!-- Chair in front of bear -->
+                        <rect x="110" y="80" width="80" height="80" rx="4" fill="#ef476f"/>
+                        <rect x="100" y="70" width="100" height="15" rx="4" fill="#d90429"/>
+                        <rect x="115" y="130" width="12" height="40" fill="#990011"/>
+                        <rect x="173" y="130" width="12" height="40" fill="#990011"/>
+                    </svg>`
+            },
+            {
+                level: 2,
+                levelTitle: "Level 2: Sentence Challenge ✍️",
+                question: "The sun is shining _____ the mountains.",
+                options: ["above", "under", "in", "behind"],
+                correct: 0, // A
+                preposition: "above",
+                explanation: "The sun is higher up / above the mountain peaks!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Sun ABOVE -->
+                        <circle cx="150" cy="45" r="22" fill="#f59e0b"/>
+                        <g stroke="#f59e0b" stroke-width="3">
+                            <line x1="150" y1="12" x2="150" y2="20"/>
+                            <line x1="150" y1="70" x2="150" y2="78"/>
+                            <line x1="117" y1="45" x2="125" y2="45"/>
+                            <line x1="175" y1="45" x2="183" y2="45"/>
+                        </g>
+                        <!-- Mountains below -->
+                        <polygon points="30,160 110,80 190,160" fill="#64748b"/>
+                        <polygon points="130,160 200,95 270,160" fill="#475569"/>
+                    </svg>`
+            },
+
+            // LEVEL 3: Super Preposition Detective
+            {
+                level: 3,
+                levelTitle: "Level 3: Super Preposition Detective 🕵️‍♂️",
+                question: "The apple is placed _____ the two boxes.",
+                options: ["next to", "in front of", "between", "under"],
+                correct: 2, // C
+                preposition: "between",
+                explanation: "The red apple sits in the middle space between both boxes!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Box 1 -->
+                        <rect x="40" y="90" width="65" height="65" fill="#d97706" rx="4"/>
+                        <!-- Box 2 -->
+                        <rect x="195" y="90" width="65" height="65" fill="#d97706" rx="4"/>
+                        <!-- Apple BETWEEN -->
+                        <circle cx="150" cy="130" r="16" fill="#dc2626"/>
+                        <path d="M 150,114 Q 155,108 152,104" stroke="#15803d" stroke-width="3" fill="none"/>
+                    </svg>`
+            },
+            {
+                level: 3,
+                levelTitle: "Level 3: Super Preposition Detective 🕵️‍♂️",
+                question: "The teacher stands _____ the whiteboard.",
+                options: ["in front of", "under", "in", "between"],
+                correct: 0, // A
+                preposition: "in front of",
+                explanation: "The teacher is standing right in front of the classroom board!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Whiteboard in background -->
+                        <rect x="50" y="30" width="200" height="100" rx="6" fill="#f8fafc" stroke="#475569" stroke-width="4"/>
+                        <!-- Teacher IN FRONT OF whiteboard -->
+                        <circle cx="150" cy="85" r="18" fill="#fde047"/>
+                        <path d="M 130,110 L 170,110 L 165,160 L 135,160 Z" fill="#8338ec"/>
+                        <rect x="138" y="160" width="8" height="20" fill="#0f172a"/>
+                        <rect x="154" y="160" width="8" height="20" fill="#0f172a"/>
+                    </svg>`
+            },
+            {
+                level: 3,
+                levelTitle: "Level 3: Super Preposition Detective 🕵️‍♂️",
+                question: "The lamp is standing _____ the table.",
+                options: ["in", "near", "under", "between"],
+                correct: 1, // B
+                preposition: "near",
+                explanation: "The lamp is located close to / near the wooden desk!",
+                svg: `
+                    <svg viewBox="0 0 300 180" class="w-full h-full">
+                        <!-- Table -->
+                        <rect x="60" y="110" width="100" height="14" fill="#78350f" rx="3"/>
+                        <rect x="70" y="124" width="10" height="40" fill="#451a03"/>
+                        <rect x="140" y="124" width="10" height="40" fill="#451a03"/>
+                        <!-- Lamp NEAR table -->
+                        <path d="M 200,90 L 230,90 L 240,120 L 190,120 Z" fill="#f59e0b"/>
+                        <rect x="212" y="120" width="6" height="40" fill="#64748b"/>
+                        <ellipse cx="215" cy="160" rx="18" ry="6" fill="#334155"/>
+                    </svg>`
+            }
+        ];
+
+        /* ==========================================================================
+           3. GAME STATE MANAGERS
+           ========================================================================== */
+        let currentQIndex = 0;
+        let score = 0;
+        let isAnswered = false;
+        let activeGesture = 0; // 0=None, 1=A, 2=B, 3=C, 4=D
+        let dwellStartTime = null;
+        const DWELL_DURATION = 1000; // 1 second hold to confirm
+        let isSimulating = false;
+
+        /* ==========================================================================
+           4. MEDIAPIPE HANDS REAL-TIME TRACKING ENGINE
+           ========================================================================== */
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('gestureCanvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const cameraStatus = document.getElementById('cameraStatus');
+        const fallbackMsg = document.getElementById('webcamFallbackMsg');
+
+        function onHandResults(results) {
+            // Adjust canvas resolution dynamically
+            canvasElement.width = videoElement.videoWidth || 640;
+            canvasElement.height = videoElement.videoHeight || 480;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            let detectedFingers = 0;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Draw hand skeleton connecting lines & joints
+                drawHandSkeleton(canvasCtx, landmarks);
+
+                // Count Extended Fingers Algorithm
+                detectedFingers = countExtendedFingers(landmarks);
+            }
+
+            canvasCtx.restore();
+
+            if (!isSimulating) {
+                processGestureInput(detectedFingers);
+            }
+        }
+
+        // Finger Extension Detection Helper
+        function countExtendedFingers(lm) {
+            let count = 0;
+
+            // Index Finger: tip (8) higher up than PIP joint (6)
+            if (lm[8].y < lm[6].y) count++;
+            // Middle Finger: tip (12) higher up than PIP joint (10)
+            if (lm[12].y < lm[10].y) count++;
+            // Ring Finger: tip (16) higher up than PIP joint (14)
+            if (lm[16].y < lm[14].y) count++;
+            // Pinky Finger: tip (20) higher up than PIP joint (18)
+            if (lm[20].y < lm[18].y) count++;
+
+            // Return finger count bounded between 0 and 4
+            return Math.min(count, 4);
+        }
+
+        // Custom Skeleton Drawing logic (avoids external drawing utils dependency errors)
+        function drawHandSkeleton(ctx, lm) {
+            const width = ctx.canvas.width;
+            const height = ctx.canvas.height;
+
+            const connections = [
+                [0,1],[1,2],[2,3],[3,4], // Thumb
+                [0,5],[5,6],[6,7],[7,8], // Index
+                [5,9],[9,10],[10,11],[11,12], // Middle
+                [9,13],[13,14],[14,15],[15,16], // Ring
+                [13,17],[17,18],[18,19],[19,20],[0,17] // Pinky & Palm
+            ];
+
+            ctx.strokeStyle = '#06D6A0';
+            ctx.lineWidth = 4;
+
+            connections.forEach(([i, j]) => {
+                ctx.beginPath();
+                ctx.moveTo(lm[i].x * width, lm[i].y * height);
+                ctx.lineTo(lm[j].x * width, lm[j].y * height);
+                ctx.stroke();
+            });
+
+            // Draw Landmark Knuckles
+            lm.forEach(pt => {
+                ctx.beginPath();
+                ctx.arc(pt.x * width, pt.y * height, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = '#FFD166';
+                ctx.fill();
+                ctx.strokeStyle = '#073B4C';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            });
+        }
+
+        // MediaPipe Hands Initialization
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        hands.onResults(onHandResults);
+
+        // MediaPipe Camera Helper
+        let camera = null;
+
+        function initWebcam() {
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+
+            camera.start()
+                .then(() => {
+                    cameraStatus.textContent = 'Camera Active 🟢';
+                    cameraStatus.className = 'text-xs px-2.5 py-1 rounded-full font-bold bg-emerald-100 text-emerald-800';
+                    fallbackMsg.classList.add('hidden');
+                    videoElement.classList.remove('opacity-0');
+                })
+                .catch(err => {
+                    console.warn('Webcam permission denied or unavailable:', err);
+                    cameraStatus.textContent = 'Manual Mode 🟡';
+                    cameraStatus.className = 'text-xs px-2.5 py-1 rounded-full font-bold bg-amber-100 text-amber-800';
+                    fallbackMsg.innerHTML = `
+                        <i class="fa-solid fa-video-slash text-3xl mb-2 text-amber-400"></i>
+                        <p class="text-xs font-bold">Camera access unavailable.</p>
+                        <p class="text-[11px] text-slate-300 mt-1">Use the "Simulate Control" buttons below to test options!</p>`;
+                    toggleSimPanel(true);
+                });
+        }
+
+        /* ==========================================================================
+           5. GESTURE HOLD (DWELL TIMER) & SELECTION PROCESSING
+           ========================================================================== */
+        const gestureBadge = document.getElementById('detectedGestureBadge');
+        const dwellOverlay = document.getElementById('dwellOverlay');
+        const dwellNumber = document.getElementById('dwellNumber');
+
+        function processGestureInput(gestureNum) {
+            if (isAnswered) return; // Stop processing if question already answered
+
+            const now = Date.now();
+
+            // Update Badge UI
+            const icons = ['None ✊', '1 Finger ☝️ (A)', '2 Fingers ✌️ (B)', '3 Fingers 🤟 (C)', '4 Fingers 🖐️ (D)'];
+            gestureBadge.textContent = icons[gestureNum] || 'None ✊';
+
+            if (gestureNum > 0 && gestureNum <= 4) {
+                if (activeGesture !== gestureNum) {
+                    activeGesture = gestureNum;
+                    dwellStartTime = now;
+                    playSound('tick');
+                }
+
+                const elapsed = now - dwellStartTime;
+                const progress = Math.min((elapsed / DWELL_DURATION) * 100, 100);
+
+                // Highlight active option UI
+                highlightOptionCard(gestureNum - 1, progress);
+
+                // Update Dwell Overlay Ring
+                dwellOverlay.style.setProperty('--progress', progress);
+                dwellOverlay.classList.remove('opacity-0');
+                dwellNumber.textContent = (gestureNum);
+
+                // Complete Dwell Hold Threshold (1000ms)
+                if (elapsed >= DWELL_DURATION) {
+                    confirmAnswer(gestureNum - 1);
+                    resetDwellState();
+                }
+            } else {
+                resetDwellState();
+            }
+        }
+
+        function resetDwellState() {
+            activeGesture = 0;
+            dwellStartTime = null;
+            dwellOverlay.classList.add('opacity-0');
+            dwellOverlay.style.setProperty('--progress', 0);
+            clearHighlights();
+        }
+
+        function highlightOptionCard(optIndex, progress) {
+            clearHighlights();
+            const card = document.getElementById(`opt-${optIndex}`);
+            if (card) {
+                card.classList.add('border-brandGreen', 'bg-emerald-50/60', 'scale-[1.02]');
+                const pBar = card.querySelector('.progress-bar');
+                if (pBar) pBar.style.width = `${progress}%`;
+            }
+        }
+
+        function clearHighlights() {
+            for (let i = 0; i < 4; i++) {
+                const card = document.getElementById(`opt-${i}`);
+                if (card) {
+                    card.classList.remove('border-brandGreen', 'bg-emerald-50/60', 'scale-[1.02]');
+                    const pBar = card.querySelector('.progress-bar');
+                    if (pBar) pBar.style.width = '0%';
+                }
+            }
+        }
+
+        // Manual Gesture Simulation
+        function simulateGesture(fingerCount) {
+            if (isAnswered) return;
+            isSimulating = true;
+            processGestureInput(fingerCount);
+            setTimeout(() => {
+                processGestureInput(fingerCount);
+            }, DWELL_DURATION + 50);
+        }
+
+        function toggleSimPanel(forceShow = false) {
+            const panel = document.getElementById('simPanel');
+            if (forceShow || panel.classList.contains('hidden')) {
+                panel.classList.remove('hidden');
+                isSimulating = true;
+            } else {
+                panel.classList.add('hidden');
+                isSimulating = false;
+            }
+        }
+
+        /* ==========================================================================
+           6. GAME PLAY & UI FLOW CONTROL
+           ========================================================================== */
+        function loadQuestion() {
+            isAnswered = false;
+            resetDwellState();
+
+            const q = questionBank[currentQIndex];
+
+            document.getElementById('questionNumBadge').textContent = `Question ${currentQIndex + 1} of ${questionBank.length}`;
+            document.getElementById('levelTitleBadge').textContent = q.levelTitle;
+            document.getElementById('questionText').textContent = q.question;
+            document.getElementById('sceneContainer').innerHTML = q.svg;
+            document.getElementById('levelDisplay').textContent = `Level ${q.level}/3`;
+
+            // Reset Options Cards UI
+            for (let i = 0; i < 4; i++) {
+                const card = document.getElementById(`opt-${i}`);
+                card.className = "option-card relative p-3.5 bg-slate-50 border-3 border-slate-200 rounded-2xl flex items-center space-x-3 transition-all duration-200 cursor-pointer hover:border-brandBlue";
+                card.querySelector('.opt-text').textContent = q.options[i];
+                card.onclick = () => confirmAnswer(i); // Click fallback
+            }
+
+            // Hide Feedback Banner
+            document.getElementById('feedbackBanner').classList.add('hidden');
+        }
+
+        function confirmAnswer(selectedIndex) {
+            if (isAnswered) return;
+            isAnswered = true;
+
+            const q = questionBank[currentQIndex];
+            const isCorrect = (selectedIndex === q.correct);
+
+            const feedbackBanner = document.getElementById('feedbackBanner');
+            const feedbackIcon = document.getElementById('feedbackIcon');
+            const feedbackTitle = document.getElementById('feedbackTitle');
+            const feedbackMsg = document.getElementById('feedbackMsg');
+
+            const selectedCard = document.getElementById(`opt-${selectedIndex}`);
+            const correctCard = document.getElementById(`opt-${q.correct}`);
+
+            if (isCorrect) {
+                score += 10;
+                document.getElementById('scoreDisplay').textContent = `Score: ${score}`;
+                playSound('correct');
+
+                // Confetti explosion effect
+                confetti({
+                    particleCount: 60,
+                    spread: 70,
+                    origin: { y: 0.7 }
+                });
+
+                selectedCard.classList.add('border-emerald-500', 'bg-emerald-100');
+
+                feedbackBanner.className = "mt-4 p-3.5 rounded-2xl border-2 border-emerald-400 bg-emerald-50 flex items-center justify-between animate-fade-in";
+                feedbackIcon.className = "w-10 h-10 rounded-full flex items-center justify-center text-xl text-white shadow bg-emerald-500";
+                feedbackIcon.innerHTML = `<i class="fa-solid fa-check"></i>`;
+                feedbackTitle.className = "font-heading font-bold text-base text-emerald-900";
+                feedbackTitle.textContent = "Awesome Job! 🎉";
+                feedbackMsg.className = "text-xs md:text-sm font-semibold text-emerald-800";
+                feedbackMsg.textContent = `${q.explanation}`;
+            } else {
+                playSound('wrong');
+
+                selectedCard.classList.add('border-rose-500', 'bg-rose-100');
+                correctCard.classList.add('border-emerald-500', 'bg-emerald-100');
+
+                feedbackBanner.className = "mt-4 p-3.5 rounded-2xl border-2 border-rose-400 bg-rose-50 flex items-center justify-between animate-fade-in";
+                feedbackIcon.className = "w-10 h-10 rounded-full flex items-center justify-center text-xl text-white shadow bg-rose-500";
+                feedbackIcon.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
+                feedbackTitle.className = "font-heading font-bold text-base text-rose-900";
+                feedbackTitle.textContent = "Nice Try! 💡";
+                feedbackMsg.className = "text-xs md:text-sm font-semibold text-rose-800";
+                feedbackMsg.textContent = `${q.explanation}`;
+            }
+
+            feedbackBanner.classList.remove('hidden');
+        }
+
+        function nextQuestion() {
+            currentQIndex++;
+            if (currentQIndex < questionBank.length) {
+                loadQuestion();
+            } else {
+                showVictoryModal();
+            }
+        }
+
+        function showVictoryModal() {
+            playSound('victory');
+            confetti({ particleCount: 150, spread: 100, origin: { y: 0.5 } });
+
+            document.getElementById('finalScoreText').textContent = `${score} / ${questionBank.length * 10}`;
+            const accuracy = Math.round((score / (questionBank.length * 10)) * 100);
+            document.getElementById('finalAccuracyText').textContent = `Accuracy: ${accuracy}%`;
+
+            document.getElementById('victoryModal').classList.remove('hidden');
+        }
+
+        function startGame() {
+            initAudio();
+            document.getElementById('startModal').classList.add('hidden');
+            initWebcam();
+            loadQuestion();
+        }
+
+        function restartGame() {
+            score = 0;
+            currentQIndex = 0;
+            document.getElementById('scoreDisplay').textContent = `Score: 0`;
+            document.getElementById('victoryModal').classList.add('hidden');
+            loadQuestion();
+        }
+    </script>
+</body>
+</html>
